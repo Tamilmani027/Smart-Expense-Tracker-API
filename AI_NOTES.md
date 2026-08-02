@@ -1,33 +1,40 @@
 # AI Notes
 
-I wrote a first draft myself (routes, a global dict for storage, some
-half-working validation), then used Claude to review it and clean things up.
+I wrote the first draft myself — routes, a global dict for storage, and
+validation that looked right but wasn't (`expense.id == ""`, where `id` is
+an `int`, so that check could never fire). I used Claude to review it,
+catch bugs like that, and help me restructure the parts that needed it.
 
-**What Claude actually changed:**
-- Pointed out my `expense.id == ""` check was dead code — id is an int, so
-  that comparison can never be true. Replaced it with real Pydantic
-  validation (`gt=0`, `min_length=1`) that fails properly with a 422.
-- Wrapped the global `expenses` dict in a small `ExpenseStore` class with
-  dependency injection, instead of a bare module-level dict. This was
-  mainly so tests could get a fresh store each time instead of sharing
-  state across the whole test run.
-- Split `/expenses/total` and `/expenses/category/{category}` onto
-  separate paths — my original design would've had "total" get treated
-  as if it were a category name.
-- Wrote the full test suite and README from scratch.
+## AI-generated vs. mine
+- **Mine:** initial route design, endpoint choices, decision on what to
+  validate (positive amounts, non-blank fields), decision to use dependency
+  injection for storage.
+- **AI-generated, then reviewed by me:** the `ExpenseStore` class, the full
+  test suite (`tests/test_api.py`), the README, and the fix to how
+  `/expenses/total` and `/expenses/category/{category}` are routed.
 
-**What I checked myself:**
-- Ran `pytest tests/ -v` on a clean checkout — all pass.
-- Hit `/expenses/total` and `/expenses/category/food` with curl manually
-  to make sure they don't collide.
-- Re-read the storage class to make sure `.delete()` returns `None` (not
-  a crash) when the id doesn't exist, since that's what the 404 branch
-  relies on.
+## What I validated and why
+- **Dead validation logic** — my `id == ""` / `title == ""` checks were
+  unreachable since Pydantic already rejects malformed input before the
+  route runs. Replaced with `Field(gt=0)` / `min_length=1` so bad input
+  fails fast with a 422 instead of silently passing through.
+- **Route collision** — my original design would have treated `total` as
+  a category name if someone hit `/expenses/total`. Fixed by giving total
+  and category-filter their own sub-paths. I confirmed this with curl
+  against both endpoints, not just by reading the code.
+- **Shared test state** — the AI's first version reused one global dict
+  across all tests, so test order could affect results. Moved storage into
+  a class injected per-test via `app.dependency_overrides`, then ran the
+  suite in a different order to confirm nothing broke because of it.
+- **Silent failure on delete** — checked that `ExpenseStore.delete()`
+  returns `None` for a missing id rather than raising, since the 404
+  branch in the route depends on that.
+- Ran `pytest tests/ -v` on a clean checkout before submitting — 14/14 pass.
 
-**What I didn't take:**
-- Claude suggested a monthly-summary endpoint as a bonus, on top of the
-  Swagger docs. Skipped it — only one bonus is asked for, and Swagger
-  comes free with FastAPI, so that's the one I'm counting.
-- It also suggested writing expenses to a JSON file for persistence. Not
-  needed here — the brief says in-memory is fine, and I didn't want to
-  deal with file-write edge cases for something that wasn't asked for.
+## What I didn't use
+- A monthly-summary endpoint, suggested as an extra bonus. The brief caps
+  bonuses at one, and I'm already claiming Swagger docs (free with
+  FastAPI), so I left it out rather than over-scope.
+- JSON-file persistence. The brief explicitly allows in-memory storage,
+  and adding file I/O would mean handling read/write race conditions that
+  weren't part of the ask.
